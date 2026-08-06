@@ -1,0 +1,10 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+python-multipart==0.0.32
+opencv-python==5.0.0.93
+pillow==12.3.0
+numpy==2.5.1
+PyWavelets==1.9.0
+supabase==2.31.0
+python-dotenv==1.2.2
+pymupdf==1.28.0
