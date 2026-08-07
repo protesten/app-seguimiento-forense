@@ -27,6 +27,21 @@ create table if not exists copias_distribuidas (
 create index if not exists idx_copias_distribuidas_id_unico_marca on copias_distribuidas (id_unico_marca);
 create index if not exists idx_copias_distribuidas_archivo_id on copias_distribuidas (archivo_id);
 
+-- Cada fila = un destinatario que un usuario guardo para no tener que escribir
+-- su nombre y email cada vez que marca un archivo. Cada usuario ve solo los
+-- suyos (usuario_id se compara siempre desde el backend, no hay politica RLS
+-- para esto -- ver nota mas abajo).
+create table if not exists destinatarios_guardados (
+    id uuid primary key default gen_random_uuid(),
+    usuario_id uuid not null,
+    nombre text not null,
+    email text not null,
+    creado_en timestamptz not null default now(),
+    unique (usuario_id, email)
+);
+
+create index if not exists idx_destinatarios_guardados_usuario_id on destinatarios_guardados (usuario_id);
+
 -- Activa la seguridad a nivel de fila y NO se crea ninguna politica de acceso.
 -- Resultado: nadie puede leer ni escribir estas tablas usando la clave publica
 -- "anon" (la que usaria el frontend). Solo el backend, que se conecta con la
@@ -34,3 +49,4 @@ create index if not exists idx_copias_distribuidas_archivo_id on copias_distribu
 -- tablas contienen nombres y emails de personas.
 alter table archivos_originales enable row level security;
 alter table copias_distribuidas enable row level security;
+alter table destinatarios_guardados enable row level security;

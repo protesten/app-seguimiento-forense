@@ -24,6 +24,8 @@ Lo que **ya funciona y está probado**:
 - ✅ **Autenticación**: todos los endpoints que tocan datos exigen haber iniciado sesión (Supabase Auth). El frontend tiene una pantalla de login; sin sesión válida, la API devuelve 401 y no deja hacer nada.
 - ✅ **Desplegado en producción**: backend en Render, frontend en Vercel, ambos en capa gratuita, probado de extremo a extremo con las URLs reales (ver [Despliegue en la nube](#despliegue-en-la-nube)).
 - ✅ **Panel de administración**: pestaña "Administración" (solo visible para administradores) con gestión de usuarios (crear, eliminar, dar/quitar permisos de admin — no hay registro público, todas las cuentas se crean aquí) y estadísticas (totales, desglose por documento/destinatario/fecha, actividad reciente).
+- ✅ **Cambiar tu propia contraseña**: cualquier usuario logueado puede hacerlo desde el propio frontend (junto a "Cerrar sesión"), sin depender de que Supabase tenga el envío de emails configurado.
+- ✅ **Destinatarios guardados**: al marcar un archivo, puedes elegir un destinatario ya guardado (autocompleta nombre y email) o guardar uno nuevo con una casilla, para no tener que volver a escribirlo la próxima vez. Cada usuario tiene su propia lista, aislada de la de los demás.
 
 Lo que **falta** está en la sección [Próximos pasos](#próximos-pasos-del-proyecto) al final de este documento.
 
@@ -59,7 +61,8 @@ App-seguimiento-forense/
 │   │       ├── ExtraerMarca.jsx   # Pantalla para leer la marca de una imagen o PDF
 │   │       ├── Admin.jsx              # Contenedor de las sub-pestañas de administracion
 │   │       ├── AdminUsuarios.jsx      # Crear/eliminar/ascender usuarios
-│   │       └── AdminEstadisticas.jsx  # Totales y desgloses
+│   │       ├── AdminEstadisticas.jsx  # Totales y desgloses
+│   │       └── CambiarPassword.jsx    # Formulario para que un usuario cambie su propia contraseña
 │   ├── .env                    # URL y clave publica de Supabase para el login (no se sube a git)
 │   ├── index.html
 │   └── package.json            # Lista de librerias que necesita el frontend
@@ -292,6 +295,22 @@ Devuelve: `[{"id": "...", "nombre_destinatario": "Juan Perez", "email_destinatar
 
 El frontend encadena `/extraer-marca` y este endpoint automáticamente: subes la imagen sospechosa una vez y te muestra directamente quién la recibió (marcando si fue una coincidencia exacta o aproximada).
 
+### Endpoints de destinatarios guardados (`/destinatarios`)
+
+Cualquier usuario logueado (no hace falta ser admin) puede guardar personas a las que suele marcarles archivos, para no volver a escribir su nombre/email cada vez.
+
+| Endpoint | Qué hace |
+|---|---|
+| `GET /destinatarios` | Lista los destinatarios guardados **del usuario que hace la petición** (no ve los de nadie más) |
+| `POST /destinatarios` | Guarda uno nuevo (`nombre`, `email`). Si repites un email que ya tenías guardado, da `400` |
+| `DELETE /destinatarios/{id}` | Elimina uno. Si el `id` no es tuyo (es de otro usuario o no existe), no falla pero tampoco borra nada — así no se puede usar para averiguar si un ID pertenece a otra persona |
+
+El aislamiento entre usuarios se hace comparando siempre `usuario_id` en el backend (igual que con los roles: no hay políticas RLS para esto, todo pasa por el `service_role` del backend).
+
+### Cambiar tu propia contraseña
+
+No es un endpoint del backend — el frontend llama directamente a Supabase (`supabase.auth.updateUser({ password })`) usando la sesión que ya tienes abierta. No hace falta la contraseña actual (el hecho de tener una sesión válida ya es suficiente prueba), ni que Supabase tenga configurado el envío de emails (que es lo que fallaba antes, cuando la única forma de cambiarla era pedirle a Supabase que mandara un email de recuperación).
+
 ### Endpoints de administración (`/admin/...`)
 
 Todos estos exigen, además del login normal, que tu cuenta tenga `role: "admin"` en Supabase Auth — si no, la API devuelve `403`. La forma normal de usarlos es desde la pestaña "Administración" del frontend, no a mano.
@@ -361,6 +380,8 @@ git commit -m "mensaje describiendo el cambio"
 git push
 ```
 
+⚠️ **Excepción**: si un cambio añade o modifica una tabla (como pasó con `destinatarios_guardados`), el `git push` **no** actualiza la base de datos — hay que ejecutar tú el `backend/supabase/schema.sql` actualizado en el SQL Editor de Supabase, aparte y antes de que el código nuevo lo necesite.
+
 ### Variables de entorno en producción
 
 Estas viven en los paneles de Render/Vercel, no en archivos `.env` (esos son solo para tu ordenador):
@@ -406,5 +427,6 @@ Estas viven en los paneles de Render/Vercel, no en archivos `.env` (esos son sol
 - [x] Quitar la dependencia de `torch` (vía `invisible-watermark`) — no la usábamos para nada, y hacía el backend ~500MB más pesado y ~250MB más hambriento de RAM en balde. Ahora `dwtDctSvd` está implementado directamente en `backend/app/dwt_dct_svd.py`, sin `torch`. Preparación necesaria para que el despliegue en la nube quepa cómodo en un plan gratuito.
 - [x] Preparar el despliegue en la nube → backend en Render + frontend en Vercel, ambos gratuitos, con auto-deploy desde GitHub en cada `git push`. Ver [Despliegue en la nube](#despliegue-en-la-nube).
 - [x] Panel de administración → gestión de usuarios (crear/eliminar/ascender, sin registro público) y estadísticas (totales, desglose por documento/destinatario/fecha, actividad reciente). Roles vía `app_metadata` de Supabase Auth, sin tabla nueva.
-- [ ] Pantalla para que un usuario cambie su propia contraseña (hoy, si un admin te crea la cuenta, te quedas con la contraseña que te dieron salvo que la cambies a mano desde el panel de Supabase)
+- [x] Pantalla para que un usuario cambie su propia contraseña → junto a "Cerrar sesión", usa `supabase.auth.updateUser` directamente, sin depender del envío de emails de Supabase
+- [x] Destinatarios guardados por usuario → `GET/POST /destinatarios`, `DELETE /destinatarios/{id}`, selector en la pantalla de marcar con autocompletado y checkbox "guardar para la próxima vez"
 - [ ] Carpeta `/mobile` para la app móvil

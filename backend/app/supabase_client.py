@@ -71,6 +71,38 @@ def registrar_copia_distribuida(
     ).execute()
 
 
+def listar_destinatarios_guardados(usuario_id: str) -> list[dict]:
+    """Devuelve los destinatarios que este usuario guardo, por nombre."""
+    cliente = obtener_cliente_supabase()
+    resultado = (
+        cliente.table("destinatarios_guardados")
+        .select("*")
+        .eq("usuario_id", usuario_id)
+        .order("nombre")
+        .execute()
+    )
+    return resultado.data
+
+
+def crear_destinatario_guardado(usuario_id: str, nombre: str, email: str) -> dict:
+    cliente = obtener_cliente_supabase()
+    resultado = (
+        cliente.table("destinatarios_guardados")
+        .insert({"usuario_id": usuario_id, "nombre": nombre, "email": email})
+        .execute()
+    )
+    return resultado.data[0]
+
+
+def eliminar_destinatario_guardado(usuario_id: str, destinatario_id: str) -> None:
+    """Solo elimina si el destinatario pertenece a este usuario (comprobado en la
+    propia consulta, ya que no hay politicas RLS que lo impidan por si solas)."""
+    cliente = obtener_cliente_supabase()
+    cliente.table("destinatarios_guardados").delete().eq("id", destinatario_id).eq(
+        "usuario_id", usuario_id
+    ).execute()
+
+
 def _distancia_edicion(a: str, b: str) -> int:
     """Distancia de edicion (Levenshtein): cuantos caracteres hay que cambiar,
     anadir o quitar para convertir 'a' en 'b'. Se usa para encontrar codigos

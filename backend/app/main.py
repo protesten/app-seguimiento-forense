@@ -15,7 +15,10 @@ from app.admin import (
 )
 from app.supabase_client import (
     buscar_copias_por_marca,
+    crear_destinatario_guardado,
+    eliminar_destinatario_guardado,
     listar_archivos_originales,
+    listar_destinatarios_guardados,
     registrar_archivo_original,
     registrar_copia_distribuida,
     verificar_token,
@@ -241,6 +244,46 @@ async def endpoint_buscar_copia(
     except Exception as error:
         logger.error("Error al buscar copia en Supabase: %s", error)
         raise HTTPException(status_code=500, detail="No se pudo consultar la base de datos. Intenta de nuevo.")
+
+
+@app.get("/destinatarios")
+async def endpoint_listar_destinatarios(usuario=Depends(usuario_autenticado)):
+    try:
+        return listar_destinatarios_guardados(usuario.id)
+    except Exception as error:
+        logger.error("Error al listar destinatarios guardados: %s", error)
+        raise HTTPException(status_code=500, detail="No se pudo consultar la base de datos. Intenta de nuevo.")
+
+
+@app.post("/destinatarios")
+async def endpoint_crear_destinatario(
+    nombre: str = Form(...), email: str = Form(...), usuario=Depends(usuario_autenticado)
+):
+    if not nombre.strip():
+        raise HTTPException(status_code=400, detail="nombre no puede estar vacio")
+
+    if not email.strip():
+        raise HTTPException(status_code=400, detail="email no puede estar vacio")
+
+    try:
+        return crear_destinatario_guardado(usuario.id, nombre.strip(), email.strip())
+    except Exception as error:
+        logger.error("Error al guardar destinatario: %s", error)
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo guardar el destinatario. Puede que ya tengas guardado ese email.",
+        )
+
+
+@app.delete("/destinatarios/{destinatario_id}")
+async def endpoint_eliminar_destinatario(destinatario_id: str, usuario=Depends(usuario_autenticado)):
+    try:
+        eliminar_destinatario_guardado(usuario.id, destinatario_id)
+    except Exception as error:
+        logger.error("Error al eliminar destinatario: %s", error)
+        raise HTTPException(status_code=400, detail="No se pudo eliminar el destinatario.")
+
+    return {"status": "ok"}
 
 
 @app.get("/admin/usuarios")

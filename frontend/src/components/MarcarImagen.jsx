@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
-import { crearArchivo, esPdf, listarArchivos, ocultarMarca } from '../api'
+import {
+  crearArchivo,
+  crearDestinatario,
+  eliminarDestinatario,
+  esPdf,
+  listarArchivos,
+  listarDestinatarios,
+  ocultarMarca,
+} from '../api'
 
 function MarcarImagen() {
   const [archivos, setArchivos] = useState([])
@@ -7,6 +15,11 @@ function MarcarImagen() {
   const [mostrarNuevoArchivo, setMostrarNuevoArchivo] = useState(false)
   const [nuevoNombreArchivo, setNuevoNombreArchivo] = useState('')
   const [creandoArchivo, setCreandoArchivo] = useState(false)
+
+  const [destinatarios, setDestinatarios] = useState([])
+  const [destinatarioGuardadoId, setDestinatarioGuardadoId] = useState('')
+  const [guardarDestinatario, setGuardarDestinatario] = useState(false)
+  const [mostrarGestionDestinatarios, setMostrarGestionDestinatarios] = useState(false)
 
   const [archivo, setArchivo] = useState(null)
   const [idUsuario, setIdUsuario] = useState('')
@@ -21,6 +34,7 @@ function MarcarImagen() {
 
   useEffect(() => {
     cargarArchivos()
+    cargarDestinatarios()
   }, [])
 
   async function cargarArchivos() {
@@ -30,6 +44,15 @@ function MarcarImagen() {
     } catch {
       // Si Supabase no esta configurado todavia, simplemente dejamos la lista vacia.
       setArchivos([])
+    }
+  }
+
+  async function cargarDestinatarios() {
+    try {
+      const lista = await listarDestinatarios()
+      setDestinatarios(lista)
+    } catch {
+      setDestinatarios([])
     }
   }
 
@@ -47,6 +70,26 @@ function MarcarImagen() {
       setError(err.message)
     } finally {
       setCreandoArchivo(false)
+    }
+  }
+
+  function manejarSeleccionarDestinatario(id) {
+    setDestinatarioGuardadoId(id)
+    const encontrado = destinatarios.find((d) => d.id === id)
+    if (encontrado) {
+      setNombreDestinatario(encontrado.nombre)
+      setEmailDestinatario(encontrado.email)
+      setGuardarDestinatario(false)
+    }
+  }
+
+  async function manejarEliminarDestinatario(id) {
+    try {
+      await eliminarDestinatario(id)
+      setDestinatarios((previos) => previos.filter((d) => d.id !== id))
+      if (destinatarioGuardadoId === id) setDestinatarioGuardadoId('')
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -70,6 +113,15 @@ function MarcarImagen() {
         archivoId,
       })
       setResultado({ url: URL.createObjectURL(blob), esPdf: fuePdf })
+
+      if (guardarDestinatario && !destinatarioGuardadoId) {
+        try {
+          const nuevo = await crearDestinatario(nombreDestinatario, emailDestinatario)
+          setDestinatarios((previos) => [...previos, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+        } catch {
+          // Si ya estaba guardado (mismo email) o falla, no bloqueamos el resultado principal.
+        }
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -166,25 +218,84 @@ function MarcarImagen() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Nombre del destinatario</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium text-slate-700">Destinatario</label>
+            {destinatarios.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMostrarGestionDestinatarios((v) => !v)}
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+              >
+                Gestionar guardados
+              </button>
+            )}
+          </div>
+
+          {destinatarios.length > 0 && (
+            <select
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm mb-2"
+              value={destinatarioGuardadoId}
+              onChange={(evento) => manejarSeleccionarDestinatario(evento.target.value)}
+            >
+              <option value="">Escribir uno nuevo...</option>
+              {destinatarios.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.nombre} ({d.email})
+                </option>
+              ))}
+            </select>
+          )}
+
+          {mostrarGestionDestinatarios && (
+            <div className="border border-slate-200 rounded-md divide-y divide-slate-100 mb-2">
+              {destinatarios.map((d) => (
+                <div key={d.id} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                  <span className="text-slate-600">{d.nombre} ({d.email})</span>
+                  <button
+                    type="button"
+                    onClick={() => manejarEliminarDestinatario(d.id)}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <input
             type="text"
             required
-            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+            placeholder="Nombre del destinatario"
+            className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm mb-2"
             value={nombreDestinatario}
-            onChange={(evento) => setNombreDestinatario(evento.target.value)}
+            onChange={(evento) => {
+              setNombreDestinatario(evento.target.value)
+              setDestinatarioGuardadoId('')
+            }}
           />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Email del destinatario</label>
           <input
             type="email"
             required
+            placeholder="Email del destinatario"
             className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
             value={emailDestinatario}
-            onChange={(evento) => setEmailDestinatario(evento.target.value)}
+            onChange={(evento) => {
+              setEmailDestinatario(evento.target.value)
+              setDestinatarioGuardadoId('')
+            }}
           />
+
+          {!destinatarioGuardadoId && (
+            <label className="flex items-center gap-2 text-xs text-slate-500 mt-2">
+              <input
+                type="checkbox"
+                checked={guardarDestinatario}
+                onChange={(evento) => setGuardarDestinatario(evento.target.checked)}
+              />
+              Guardar este destinatario para la próxima vez
+            </label>
+          )}
         </div>
 
         <button

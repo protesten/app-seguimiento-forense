@@ -97,6 +97,41 @@ export async function buscarCopiaPorMarca(idUsuario) {
   return respuesta.json()
 }
 
+export async function listarDestinatarios() {
+  const respuesta = await fetch(`${API_BASE_URL}/destinatarios`, { headers: await cabecerasAuth() })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo obtener la lista de destinatarios'))
+  }
+  return respuesta.json()
+}
+
+export async function crearDestinatario(nombre, email) {
+  const datos = new FormData()
+  datos.append('nombre', nombre)
+  datos.append('email', email)
+
+  const respuesta = await fetch(`${API_BASE_URL}/destinatarios`, {
+    method: 'POST',
+    body: datos,
+    headers: await cabecerasAuth(),
+  })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo guardar el destinatario'))
+  }
+  return respuesta.json()
+}
+
+export async function eliminarDestinatario(destinatarioId) {
+  const respuesta = await fetch(`${API_BASE_URL}/destinatarios/${destinatarioId}`, {
+    method: 'DELETE',
+    headers: await cabecerasAuth(),
+  })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo eliminar el destinatario'))
+  }
+  return respuesta.json()
+}
+
 export async function adminListarUsuarios() {
   const respuesta = await fetch(`${API_BASE_URL}/admin/usuarios`, { headers: await cabecerasAuth() })
   if (!respuesta.ok) {

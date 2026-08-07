@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Admin from './components/Admin'
+import CambiarPassword from './components/CambiarPassword'
 import EstadoBackend from './components/EstadoBackend'
 import ExtraerMarca from './components/ExtraerMarca'
 import Login from './components/Login'
@@ -38,6 +39,7 @@ function App() {
           <EstadoBackend />
           <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
             <span>{sesion.user.email}</span>
+            <CambiarPassword />
             <button
               type="button"
               onClick={() => supabase.auth.signOut()}
