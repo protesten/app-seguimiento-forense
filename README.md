@@ -4,6 +4,13 @@ Aplicación para marcar imágenes y documentos de forma invisible (watermarking)
 
 Esta guía asume que **no sabes programar** y te explica cada paso, incluso los que a un programador le parecerían obvios.
 
+## 🌐 La app ya está desplegada
+
+- **Web**: https://app-seguimiento-forense.vercel.app
+- **API**: https://seguimiento-forense-backend.onrender.com
+
+Todo lo demás en este documento (los "Paso 1-4") es para trabajar en el proyecto **en tu ordenador** (añadir funciones, arreglar cosas, probar antes de subir). Para el detalle de cómo está desplegado, ve a la sección [Despliegue en la nube](#despliegue-en-la-nube).
+
 ## Estado actual del proyecto
 
 Lo que **ya funciona y está probado**:
@@ -15,6 +22,7 @@ Lo que **ya funciona y está probado**:
 - ✅ Frontend (React + Tailwind) con dos pantallas funcionales que aceptan imagen o PDF indistintamente: **Marcar imagen** (elegir/crear documento, subir el archivo, poner destinatario, descargar el resultado) y **Verificar imagen filtrada** (subir el archivo sospechoso y ver directamente quién lo recibió, sin tocar Supabase a mano).
 - ✅ Investigado y descartado: rescatar la marca de una foto de cámara a la pantalla (ver [Limitaciones conocidas](#limitaciones-conocidas-probadas-no-teóricas)) y añadir una marca visible de respaldo (rompería el sigilo, que es el objetivo central del proyecto).
 - ✅ **Autenticación**: todos los endpoints que tocan datos exigen haber iniciado sesión (Supabase Auth). El frontend tiene una pantalla de login; sin sesión válida, la API devuelve 401 y no deja hacer nada.
+- ✅ **Desplegado en producción**: backend en Render, frontend en Vercel, ambos en capa gratuita, probado de extremo a extremo con las URLs reales (ver [Despliegue en la nube](#despliegue-en-la-nube)).
 
 Lo que **falta** está en la sección [Próximos pasos](#próximos-pasos-del-proyecto) al final de este documento.
 
@@ -308,6 +316,51 @@ Como el archivo que sí necesitábamos (`dwtDctSvd.py`, con licencia MIT) no dep
 - Las páginas que ya son un escaneo (solo imagen, sin texto) se marcan con la misma técnica que las imágenes sueltas — hereda sus mismas limitaciones (compresión agresiva, foto de cámara a pantalla).
 - Un PDF con texto real, si se aplana a imágenes *después* de marcado (por ejemplo, "imprimir a PDF" desde un escáner), pierde la marca — misma limitación de fondo que la foto-de-pantalla en imágenes.
 
+## Despliegue en la nube
+
+La app está desplegada de verdad, con capa gratuita en las tres piezas:
+
+| Pieza | Dónde | URL |
+|---|---|---|
+| Backend (API) | [Render](https://render.com) | https://seguimiento-forense-backend.onrender.com |
+| Frontend (web) | [Vercel](https://vercel.com) | https://app-seguimiento-forense.vercel.app |
+| Base de datos + Auth | [Supabase](https://supabase.com) | (ya lo tenías configurado) |
+
+### Cómo se actualiza
+
+El código vive en GitHub (`github.com/protesten/app-seguimiento-forense`). Tanto Render como Vercel están conectados a ese repositorio: **cada vez que hagas `git push` a la rama `main`, ambos vuelven a desplegar automáticamente solos**, sin que tengas que hacer nada en sus paneles. No hace falta repetir el proceso de configuración manual.
+
+```bash
+git add -A
+git commit -m "mensaje describiendo el cambio"
+git push
+```
+
+### Variables de entorno en producción
+
+Estas viven en los paneles de Render/Vercel, no en archivos `.env` (esos son solo para tu ordenador):
+
+**Render** (Environment):
+- `SUPABASE_URL`, `SUPABASE_KEY` (la clave `service_role`)
+- `FRONTEND_ORIGINS=https://app-seguimiento-forense.vercel.app` (para que el navegador pueda hablar con la API — si despliegas el frontend en otro dominio más adelante, añádelo aquí separado por comas)
+
+**Vercel** (Settings → Environment Variables):
+- `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (la clave pública/`publishable`, no la `service_role`)
+- `VITE_API_URL=https://seguimiento-forense-backend.onrender.com`
+
+### Limitaciones del plan gratuito (probadas, no teóricas)
+
+- **El backend "se duerme"**: Render apaga la instancia gratuita tras ~15 minutos sin tráfico. La primera petición después de eso puede tardar **hasta 50 segundos** en responder mientras arranca de nuevo (esto lo avisa el propio Render en su panel). Las peticiones siguientes van rápido hasta que se vuelve a dormir por inactividad.
+- **Ráfagas de peticiones simultáneas pueden fallar**: probando el despliegue, mandé 20 peticiones seguidas sin pausa y un 45% devolvió un `404` genérico. Investigando con los logs de Render confirmamos que **la aplicación en sí nunca fallaba** (su propio registro solo mostraba respuestas correctas, 200 o 401) — el `404` lo generaba la capa gratuita de Render cuando el único worker disponible (`WEB_CONCURRENCY=1` en el plan gratuito) recibía más peticiones a la vez de las que podía atender de inmediato. Repetimos la misma prueba con una pausa de 1.5s entre peticiones (uso normal de una persona) y salieron **15 de 15 correctas**. Conclusión: no afecta el uso normal de una sola persona a la vez; si varias personas fueran a usar la app simultáneamente con frecuencia, valdría la pena pasar a un plan de pago (más workers).
+- Si algún día necesitas que el backend no se duerma nunca (por ejemplo, para una demo importante), la opción más simple es subir el plan de Render a uno de pago (~$7/mes).
+
+### Cómo desplegarlo desde cero (por si algún día hay que rehacerlo)
+
+1. El código debe estar en un repositorio de GitHub — `git init`, `git remote add origin <url>`, `git push`.
+2. **Backend en Render**: New → Blueprint → selecciona el repo. Render detecta [render.yaml](render.yaml) automáticamente y te pide rellenar `SUPABASE_URL` y `SUPABASE_KEY` (deja `FRONTEND_ORIGINS` vacío por ahora).
+3. **Frontend en Vercel**: Add New → Project → importa el repo → **Root Directory: `frontend`** (importante, es un monorepo) → añade las variables de entorno (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_URL` con la URL de Render del paso 2) → Deploy.
+4. Vuelve al panel de Render → Environment → rellena `FRONTEND_ORIGINS` con la URL que te dio Vercel en el paso 3 → guarda (se reinicia solo).
+
 ## Próximos pasos del proyecto
 
 - [x] Elegir la técnica de marcado invisible → `invisible-watermark` con `dwtDctSvd`
@@ -327,4 +380,4 @@ Como el archivo que sí necesitábamos (`dwtDctSvd.py`, con licencia MIT) no dep
 - [x] Manejar los errores de marca "casi correcta" → `GET /copias/{id_unico_marca}` busca coincidencias aproximadas (distancia de edición, tolerancia configurable) cuando no hay coincidencia exacta; el frontend lo marca en amarillo con la diferencia exacta
 - [x] Quitar la dependencia de `torch` (vía `invisible-watermark`) — no la usábamos para nada, y hacía el backend ~500MB más pesado y ~250MB más hambriento de RAM en balde. Ahora `dwtDctSvd` está implementado directamente en `backend/app/dwt_dct_svd.py`, sin `torch`. Preparación necesaria para que el despliegue en la nube quepa cómodo en un plan gratuito.
 - [ ] Carpeta `/mobile` para la app móvil
-- [ ] Preparar el despliegue en la nube (hoy todo corre solo en tu ordenador, y el frontend tiene la URL del backend fija en el código)
+- [x] Preparar el despliegue en la nube → backend en Render + frontend en Vercel, ambos gratuitos, con auto-deploy desde GitHub en cada `git push`. Ver [Despliegue en la nube](#despliegue-en-la-nube).
