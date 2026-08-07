@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import Admin from './components/Admin'
 import EstadoBackend from './components/EstadoBackend'
 import ExtraerMarca from './components/ExtraerMarca'
 import Login from './components/Login'
@@ -27,9 +28,11 @@ function App() {
     return <Login />
   }
 
+  const esAdmin = sesion.user.app_metadata?.role === 'admin'
+
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4">
-      <div className="max-w-xl mx-auto space-y-6">
+      <div className="max-w-2xl mx-auto space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-semibold text-slate-800">App de Seguimiento Forense</h1>
           <EstadoBackend />
@@ -69,10 +72,25 @@ function App() {
             >
               Verificar imagen filtrada
             </button>
+            {esAdmin && (
+              <button
+                type="button"
+                onClick={() => setPestana('admin')}
+                className={`flex-1 py-3 text-sm font-medium ${
+                  pestana === 'admin'
+                    ? 'text-slate-800 border-b-2 border-slate-800'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                Administración
+              </button>
+            )}
           </div>
 
           <div className="p-6">
-            {pestana === 'marcar' ? <MarcarImagen /> : <ExtraerMarca />}
+            {pestana === 'marcar' && <MarcarImagen />}
+            {pestana === 'extraer' && <ExtraerMarca />}
+            {pestana === 'admin' && esAdmin && <Admin />}
           </div>
         </div>
       </div>

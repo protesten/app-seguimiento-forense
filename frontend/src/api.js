@@ -96,3 +96,62 @@ export async function buscarCopiaPorMarca(idUsuario) {
   }
   return respuesta.json()
 }
+
+export async function adminListarUsuarios() {
+  const respuesta = await fetch(`${API_BASE_URL}/admin/usuarios`, { headers: await cabecerasAuth() })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo obtener la lista de usuarios'))
+  }
+  return respuesta.json()
+}
+
+export async function adminCrearUsuario({ email, password, esAdmin }) {
+  const datos = new FormData()
+  datos.append('email', email)
+  datos.append('password', password)
+  datos.append('es_admin', esAdmin ? 'true' : 'false')
+
+  const respuesta = await fetch(`${API_BASE_URL}/admin/usuarios`, {
+    method: 'POST',
+    body: datos,
+    headers: await cabecerasAuth(),
+  })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo crear el usuario'))
+  }
+  return respuesta.json()
+}
+
+export async function adminEliminarUsuario(userId) {
+  const respuesta = await fetch(`${API_BASE_URL}/admin/usuarios/${userId}`, {
+    method: 'DELETE',
+    headers: await cabecerasAuth(),
+  })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo eliminar el usuario'))
+  }
+  return respuesta.json()
+}
+
+export async function adminActualizarUsuario(userId, esAdmin) {
+  const datos = new FormData()
+  datos.append('es_admin', esAdmin ? 'true' : 'false')
+
+  const respuesta = await fetch(`${API_BASE_URL}/admin/usuarios/${userId}`, {
+    method: 'PATCH',
+    body: datos,
+    headers: await cabecerasAuth(),
+  })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo actualizar el usuario'))
+  }
+  return respuesta.json()
+}
+
+export async function adminEstadisticas() {
+  const respuesta = await fetch(`${API_BASE_URL}/admin/estadisticas`, { headers: await cabecerasAuth() })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo obtener las estadisticas'))
+  }
+  return respuesta.json()
+}

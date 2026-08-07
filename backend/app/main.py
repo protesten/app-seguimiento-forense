@@ -5,6 +5,14 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from app.admin import (
+    actualizar_rol_usuario,
+    crear_usuario,
+    eliminar_usuario,
+    listar_usuarios,
+    obtener_estadisticas,
+    usuario_es_admin,
+)
 from app.supabase_client import (
     buscar_copias_por_marca,
     listar_archivos_originales,
@@ -55,6 +63,16 @@ async def usuario_autenticado(authorization: str | None = Header(None)):
         return verificar_token(token)
     except Exception:
         raise HTTPException(status_code=401, detail="Sesion invalida o caducada, vuelve a iniciar sesion")
+
+
+def admin_requerido(usuario=Depends(usuario_autenticado)):
+    """Dependencia adicional para los endpoints de /admin: exige ademas que el
+    usuario tenga role='admin'. Si le quitas el rol de administrador a alguien
+    con sesion activa, sigue teniendo acceso admin hasta que su token caduque
+    (maximo 1 hora) o vuelva a iniciar sesion -- es como funcionan los JWT."""
+    if not usuario_es_admin(usuario):
+        raise HTTPException(status_code=403, detail="Esta accion requiere permisos de administrador")
+    return usuario
 
 
 @app.get("/")
@@ -223,3 +241,74 @@ async def endpoint_buscar_copia(
     except Exception as error:
         logger.error("Error al buscar copia en Supabase: %s", error)
         raise HTTPException(status_code=500, detail="No se pudo consultar la base de datos. Intenta de nuevo.")
+
+
+@app.get("/admin/usuarios")
+async def endpoint_listar_usuarios(admin=Depends(admin_requerido)):
+    try:
+        return listar_usuarios()
+    except Exception as error:
+        logger.error("Error al listar usuarios: %s", error)
+        raise HTTPException(status_code=500, detail="No se pudo obtener la lista de usuarios.")
+
+
+@app.post("/admin/usuarios")
+async def endpoint_crear_usuario(
+    email: str = Form(...),
+    password: str = Form(...),
+    es_admin: bool = Form(False),
+    admin=Depends(admin_requerido),
+):
+    if not email.strip():
+        raise HTTPException(status_code=400, detail="email no puede estar vacio")
+
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres")
+
+    try:
+        return crear_usuario(email.strip(), password, es_admin)
+    except Exception as error:
+        logger.error("Error al crear usuario: %s", error)
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo crear el usuario. Puede que ese email ya este registrado.",
+        )
+
+
+@app.delete("/admin/usuarios/{user_id}")
+async def endpoint_eliminar_usuario(user_id: str, admin=Depends(admin_requerido)):
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta")
+
+    try:
+        eliminar_usuario(user_id)
+    except Exception as error:
+        logger.error("Error al eliminar usuario: %s", error)
+        raise HTTPException(status_code=400, detail="No se pudo eliminar el usuario.")
+
+    return {"status": "ok"}
+
+
+@app.patch("/admin/usuarios/{user_id}")
+async def endpoint_actualizar_usuario(
+    user_id: str, es_admin: bool = Form(...), admin=Depends(admin_requerido)
+):
+    if user_id == admin.id and not es_admin:
+        raise HTTPException(
+            status_code=400, detail="No puedes quitarte a ti mismo los permisos de administrador"
+        )
+
+    try:
+        return actualizar_rol_usuario(user_id, es_admin)
+    except Exception as error:
+        logger.error("Error al actualizar usuario: %s", error)
+        raise HTTPException(status_code=400, detail="No se pudo actualizar el usuario.")
+
+
+@app.get("/admin/estadisticas")
+async def endpoint_estadisticas(admin=Depends(admin_requerido)):
+    try:
+        return obtener_estadisticas()
+    except Exception as error:
+        logger.error("Error al calcular estadisticas: %s", error)
+        raise HTTPException(status_code=500, detail="No se pudieron calcular las estadisticas.")

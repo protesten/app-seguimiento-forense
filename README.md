@@ -23,6 +23,7 @@ Lo que **ya funciona y está probado**:
 - ✅ Investigado y descartado: rescatar la marca de una foto de cámara a la pantalla (ver [Limitaciones conocidas](#limitaciones-conocidas-probadas-no-teóricas)) y añadir una marca visible de respaldo (rompería el sigilo, que es el objetivo central del proyecto).
 - ✅ **Autenticación**: todos los endpoints que tocan datos exigen haber iniciado sesión (Supabase Auth). El frontend tiene una pantalla de login; sin sesión válida, la API devuelve 401 y no deja hacer nada.
 - ✅ **Desplegado en producción**: backend en Render, frontend en Vercel, ambos en capa gratuita, probado de extremo a extremo con las URLs reales (ver [Despliegue en la nube](#despliegue-en-la-nube)).
+- ✅ **Panel de administración**: pestaña "Administración" (solo visible para administradores) con gestión de usuarios (crear, eliminar, dar/quitar permisos de admin — no hay registro público, todas las cuentas se crean aquí) y estadísticas (totales, desglose por documento/destinatario/fecha, actividad reciente).
 
 Lo que **falta** está en la sección [Próximos pasos](#próximos-pasos-del-proyecto) al final de este documento.
 
@@ -37,6 +38,7 @@ App-seguimiento-forense/
 │   │   ├── watermark.py        # Logica de marcar/leer la marca invisible en imagenes
 │   │   ├── dwt_dct_svd.py      # Algoritmo de marcado en si (adaptado de invisible-watermark, sin torch)
 │   │   ├── watermark_pdf.py    # Logica de marcar/leer la marca invisible en PDFs
+│   │   ├── admin.py            # Gestion de usuarios y estadisticas (solo para administradores)
 │   │   └── supabase_client.py  # Conexion con la base de datos de Supabase
 │   ├── supabase/
 │   │   └── schema.sql          # Script SQL para crear las tablas (se ejecuta en el panel de Supabase, no aqui)
@@ -54,7 +56,10 @@ App-seguimiento-forense/
 │   │       ├── EstadoBackend.jsx  # Indicador de conexion con el backend
 │   │       ├── Login.jsx          # Pantalla de inicio de sesion
 │   │       ├── MarcarImagen.jsx   # Pantalla para subir y marcar una imagen o PDF
-│   │       └── ExtraerMarca.jsx   # Pantalla para leer la marca de una imagen o PDF
+│   │       ├── ExtraerMarca.jsx   # Pantalla para leer la marca de una imagen o PDF
+│   │       ├── Admin.jsx              # Contenedor de las sub-pestañas de administracion
+│   │       ├── AdminUsuarios.jsx      # Crear/eliminar/ascender usuarios
+│   │       └── AdminEstadisticas.jsx  # Totales y desgloses
 │   ├── .env                    # URL y clave publica de Supabase para el login (no se sube a git)
 │   ├── index.html
 │   └── package.json            # Lista de librerias que necesita el frontend
@@ -287,6 +292,26 @@ Devuelve: `[{"id": "...", "nombre_destinatario": "Juan Perez", "email_destinatar
 
 El frontend encadena `/extraer-marca` y este endpoint automáticamente: subes la imagen sospechosa una vez y te muestra directamente quién la recibió (marcando si fue una coincidencia exacta o aproximada).
 
+### Endpoints de administración (`/admin/...`)
+
+Todos estos exigen, además del login normal, que tu cuenta tenga `role: "admin"` en Supabase Auth — si no, la API devuelve `403`. La forma normal de usarlos es desde la pestaña "Administración" del frontend, no a mano.
+
+| Endpoint | Qué hace |
+|---|---|
+| `GET /admin/usuarios` | Lista todas las cuentas (email, si es admin, últimos accesos) |
+| `POST /admin/usuarios` | Crea una cuenta nueva (`email`, `password`, `es_admin`) |
+| `PATCH /admin/usuarios/{id}` | Cambia si una cuenta es admin o no (`es_admin`) |
+| `DELETE /admin/usuarios/{id}` | Elimina una cuenta |
+| `GET /admin/estadisticas` | Totales, desglose por documento/destinatario/fecha, actividad reciente |
+
+**Cómo funcionan los roles**: no hay una tabla nueva para esto — se usa el campo `app_metadata` que ya trae Supabase Auth (`role: "admin"`). Cada endpoint de administración depende de `usuario_autenticado` (el login normal) más una comprobación extra de ese campo.
+
+**Protecciones probadas**: no puedes eliminar tu propia cuenta ni quitarte a ti mismo el rol de administrador (para no dejar la app sin ningún admin por accidente) — ambas devuelven `400` con un mensaje claro si lo intentas.
+
+⚠️ **Los cambios de rol tardan en aplicar si la persona ya tiene sesión iniciada**: el permiso de administrador viaja dentro del token de sesión (JWT), que se genera al iniciar sesión y dura hasta 1 hora. Si le quitas el rol de admin a alguien que ya está usando la app, seguirá teniendo acceso de administrador hasta que su token caduque o cierre sesión y vuelva a entrar — no es instantáneo.
+
+**No hay registro público**: la única forma de crear cuentas es que un administrador lo haga desde este panel (o tú a mano desde Supabase, como al principio). La primera cuenta administradora del proyecto se creó así, directamente con la API, antes de que existiera ninguna cuenta.
+
 ### Por qué el `ID_Usuario` está limitado a 8 caracteres (solo en imágenes)
 
 El algoritmo de marcado necesita saber de antemano cuántos caracteres tiene que buscar dentro de la imagen. Probamos varias longitudes: cuanto más largo el código, más frágil es la marca si la imagen se recomprime (por ejemplo, al hacerle una captura de pantalla o reenviarla por WhatsApp). Con 8 caracteres el equilibrio entre "cabe información útil" y "sobrevive a compresión" es razonable.
@@ -379,5 +404,7 @@ Estas viven en los paneles de Render/Vercel, no en archivos `.env` (esos son sol
 - [x] `nombre_destinatario` y `email_destinatario` ahora rechazan espacios en blanco vacíos, igual que `ID_Usuario`
 - [x] Manejar los errores de marca "casi correcta" → `GET /copias/{id_unico_marca}` busca coincidencias aproximadas (distancia de edición, tolerancia configurable) cuando no hay coincidencia exacta; el frontend lo marca en amarillo con la diferencia exacta
 - [x] Quitar la dependencia de `torch` (vía `invisible-watermark`) — no la usábamos para nada, y hacía el backend ~500MB más pesado y ~250MB más hambriento de RAM en balde. Ahora `dwtDctSvd` está implementado directamente en `backend/app/dwt_dct_svd.py`, sin `torch`. Preparación necesaria para que el despliegue en la nube quepa cómodo en un plan gratuito.
-- [ ] Carpeta `/mobile` para la app móvil
 - [x] Preparar el despliegue en la nube → backend en Render + frontend en Vercel, ambos gratuitos, con auto-deploy desde GitHub en cada `git push`. Ver [Despliegue en la nube](#despliegue-en-la-nube).
+- [x] Panel de administración → gestión de usuarios (crear/eliminar/ascender, sin registro público) y estadísticas (totales, desglose por documento/destinatario/fecha, actividad reciente). Roles vía `app_metadata` de Supabase Auth, sin tabla nueva.
+- [ ] Pantalla para que un usuario cambie su propia contraseña (hoy, si un admin te crea la cuenta, te quedas con la contraseña que te dieron salvo que la cambies a mano desde el panel de Supabase)
+- [ ] Carpeta `/mobile` para la app móvil
