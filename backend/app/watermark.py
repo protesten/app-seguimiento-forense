@@ -88,6 +88,14 @@ def ocultar_marca(datos_imagen: bytes, id_usuario: str) -> bytes:
     return _bgr_a_png_bytes(imagen_marcada)
 
 
+def _decodificar_bgr(imagen_bgr: np.ndarray) -> str:
+    canonica = cv2.resize(imagen_bgr, TAMANO_CANONICO, interpolation=cv2.INTER_AREA)
+    embed = EmbedDwtDctSvd(wmLen=WATERMARK_LENGTH_BITS)
+    bits = embed.decode(canonica)
+    contenido = np.packbits(bits)[:WATERMARK_LENGTH_BYTES].tobytes()
+    return contenido.rstrip(b"\x00").decode("utf-8", errors="ignore")
+
+
 def extraer_marca(datos_imagen: bytes) -> str:
     """Lee la marca invisible de la imagen y devuelve el ID_Usuario detectado.
 
@@ -95,10 +103,65 @@ def extraer_marca(datos_imagen: bytes) -> str:
     TAMANO_CANONICO -- sea cual sea el tamano real de la imagen recibida.
     """
     imagen_bgr = _leer_imagen_como_bgr(datos_imagen)
+    return _decodificar_bgr(imagen_bgr)
 
-    canonica = cv2.resize(imagen_bgr, TAMANO_CANONICO, interpolation=cv2.INTER_AREA)
-    embed = EmbedDwtDctSvd(wmLen=WATERMARK_LENGTH_BITS)
-    bits = embed.decode(canonica)
-    contenido = np.packbits(bits)[:WATERMARK_LENGTH_BYTES].tobytes()
 
-    return contenido.rstrip(b"\x00").decode("utf-8", errors="ignore")
+def _detectar_borde_por_varianza(imagen_bgr: np.ndarray, umbral: float = 20.0) -> np.ndarray | None:
+    """Encuentra donde empieza el contenido 'real' de la imagen, asumiendo que
+    cualquier margen anadido (barra de herramientas, fondo de un visor, etc.)
+    es de color practicamente uniforme mientras que el contenido real no lo es.
+    Mira cada fila/columna por separado (no asume un margen simetrico) y
+    devuelve la imagen recortada a esa zona, o None si no encuentra un recorte
+    razonable (ya sea porque no hay margen o porque quedaria demasiado pequena).
+
+    A diferencia de la deteccion de bordes que probamos para fotos de camara a
+    una pantalla, esto SI funciona de forma fiable: una captura de pantalla
+    digital tiene bordes nitidos (sin el desenfoque de una foto real), que es
+    justo lo que hacia que aquella deteccion fallara.
+    """
+    gris = cv2.cvtColor(imagen_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    alto, ancho = gris.shape
+
+    varianza_filas = gris.var(axis=1)
+    varianza_columnas = gris.var(axis=0)
+
+    filas_con_contenido = np.flatnonzero(varianza_filas > umbral)
+    columnas_con_contenido = np.flatnonzero(varianza_columnas > umbral)
+    if filas_con_contenido.size == 0 or columnas_con_contenido.size == 0:
+        return None
+
+    arriba, abajo = filas_con_contenido[0], filas_con_contenido[-1]
+    izquierda, derecha = columnas_con_contenido[0], columnas_con_contenido[-1]
+
+    if abajo - arriba < MIN_IMAGE_SIDE or derecha - izquierda < MIN_IMAGE_SIDE:
+        return None
+    if arriba == 0 and izquierda == 0 and abajo == alto - 1 and derecha == ancho - 1:
+        return None  # no habia margen que quitar
+
+    return imagen_bgr[arriba : abajo + 1, izquierda : derecha + 1]
+
+
+def extraer_marca_candidatos(datos_imagen: bytes) -> list[str]:
+    """Como extraer_marca, pero devuelve varias hipotesis en vez de una sola.
+
+    Sirve para el caso de una CAPTURA DE PANTALLA (de una imagen o de una
+    pagina de PDF escaneada mostrada en un visor): si la captura incluye un
+    margen alrededor del contenido real (barra de herramientas, fondo, etc.),
+    la lectura directa falla por completo -- el algoritmo necesita que el
+    encuadre coincida casi al pixel. En vez de adivinar, se generan varias
+    lecturas candidatas (sin recortar, y con distintos recortes automaticos) y
+    quien llama a esta funcion (que sí tiene acceso a la base de datos) se
+    queda con la primera que coincida con un codigo real ya emitido.
+
+    El primer elemento de la lista es siempre la lectura sin recortar (el caso
+    normal, sin margen) -- para no cambiar el comportamiento en el 99% de los
+    casos donde no hace falta ningun recorte.
+    """
+    imagen_bgr = _leer_imagen_como_bgr(datos_imagen)
+    candidatos = [_decodificar_bgr(imagen_bgr)]
+
+    recorte_por_varianza = _detectar_borde_por_varianza(imagen_bgr)
+    if recorte_por_varianza is not None:
+        candidatos.append(_decodificar_bgr(recorte_por_varianza))
+
+    return candidatos

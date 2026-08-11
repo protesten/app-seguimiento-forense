@@ -26,7 +26,7 @@ from app.supabase_client import (
 from app.watermark import (
     WATERMARK_LENGTH_BYTES,
     ImagenDemasiadoPequenaError,
-    extraer_marca,
+    extraer_marca_candidatos,
     ocultar_marca,
 )
 from app.watermark_pdf import PdfInvalidoError, extraer_marca_pdf, ocultar_marca_pdf
@@ -171,12 +171,29 @@ async def endpoint_extraer_marca(imagen: UploadFile = File(...), usuario=Depends
     datos = await imagen.read()
 
     try:
-        id_usuario_detectado = extraer_marca(datos)
+        candidatos = extraer_marca_candidatos(datos)
     except Exception as error:
         logger.error("Error al extraer marca en /extraer-marca: %s", error)
         raise HTTPException(status_code=400, detail="No se pudo leer la imagen. Revisa que sea un archivo de imagen valido.")
 
-    return {"ID_Usuario": id_usuario_detectado}
+    if not candidatos:
+        return {"ID_Usuario": ""}
+
+    # El primer candidato (sin recortar) es el caso normal. Si no coincide con
+    # ningun codigo real, probamos los demas candidatos (recortes automaticos
+    # pensados para capturas de pantalla con margen alrededor del contenido) --
+    # solo nos quedamos con uno si coincide EXACTO con algo ya emitido, para no
+    # sustituir el resultado principal por una lectura peor sin motivo.
+    for candidato in candidatos:
+        if not candidato:
+            continue
+        try:
+            if buscar_copias_por_marca(candidato, tolerancia=0):
+                return {"ID_Usuario": candidato}
+        except Exception as error:
+            logger.warning("No se pudo verificar el candidato %r contra Supabase: %s", candidato, error)
+
+    return {"ID_Usuario": candidatos[0]}
 
 
 @app.post("/ocultar-marca-pdf")
