@@ -15,7 +15,7 @@ Todo lo demás en este documento (los "Paso 1-4") es para trabajar en el proyect
 
 Lo que **ya funciona y está probado**:
 
-- ✅ Backend en FastAPI con endpoints reales: registrar y listar documentos (`/archivos`), marcar y leer la marca de **imágenes** (`/ocultar-marca`, `/extraer-marca`), marcar y leer la marca de **PDFs** (`/ocultar-marca-pdf`, `/extraer-marca-pdf`) y buscar quién recibió una marca concreta (`/copias/{id_unico_marca}`).
+- ✅ Backend en FastAPI con endpoints reales: registrar y listar documentos (`/archivos`), marcar y leer la marca de **imágenes** (`/ocultar-marca`, `/extraer-marca`), marcar y leer la marca de **PDFs** (`/ocultar-marca-pdf`, `/extraer-marca-pdf`), marcar para **varios destinatarios a la vez** (`/ocultar-marca-lote`) y buscar quién recibió una marca concreta (`/copias/{id_unico_marca}`).
 - ✅ El marcado invisible de imágenes usa el algoritmo `dwtDctSvd` (frecuencia de la imagen, no metadatos ni píxeles visibles) — implementado directamente en [backend/app/dwt_dct_svd.py](backend/app/dwt_dct_svd.py) en vez de depender del paquete `invisible-watermark` completo, que arrastraba `torch` sin usarlo (ver detalle más abajo). En PDFs, las páginas con texto real usan texto en modo de renderizado invisible dentro del contenido (no metadatos), y las páginas que son un escaneo usan el mismo marcado de frecuencia que las imágenes, elegido automáticamente según cada página (ver detalle más abajo).
 - ✅ Cada vez que se marca un archivo, se guarda automáticamente en Supabase quién lo recibió (nombre, email) y qué marca se le puso.
 - ✅ Base de datos en Supabase conectada y probada con datos reales.
@@ -29,6 +29,7 @@ Lo que **ya funciona y está probado**:
 - ✅ **Destinatarios guardados**: al marcar un archivo, puedes elegir un destinatario ya guardado (autocompleta nombre y email) o guardar uno nuevo con una casilla, para no tener que volver a escribirlo la próxima vez. Cada usuario tiene su propia lista, aislada de la de los demás.
 - ✅ **Tolerancia a márgenes en capturas de pantalla (2026-08-11)**: una captura que incluye un margen alrededor del contenido (barra de herramientas de un visor, fondo, scroll no perfecto) ya no rompe la lectura de la marca — se detecta y recorta automáticamente el margen antes de leer (ver [Tolerancia a márgenes/recortes en capturas de pantalla](#tolerancia-a-márgenesrecortes-en-capturas-de-pantalla)).
 - ✅ **Enviar directamente por email al destinatario (2026-08-12)**: al marcar un archivo, puedes elegir entre descargarlo o que la app lo mande por email usando Resend, sin tener que reenviarlo tú a mano. Ver [Enviar directamente por email al destinatario](#enviar-directamente-por-email-al-destinatario).
+- ✅ **Marcar para varios destinatarios a la vez (2026-08-12)**: subes el archivo una sola vez, añades tantos destinatarios como haga falta, y la app genera una copia marcada distinta para cada uno (código único automático) — todo en un `.zip` o enviado por email a cada uno. Ver [Marcar para varios destinatarios a la vez](#marcar-para-varios-destinatarios-a-la-vez).
 
 Lo que **falta** está en la sección [Próximos pasos](#próximos-pasos-del-proyecto) al final de este documento.
 
@@ -327,6 +328,23 @@ En la pantalla de marcar, además de "Descargar el archivo marcado" puedes elegi
 
 **Si el envío falla** (clave no configurada, límite de Resend alcanzado, destinatario no permitido en modo de prueba, etc.): el archivo **ya se marcó y el registro ya se guardó** en Supabase antes de intentar el envío — solo falla el email, y el frontend te muestra el error para que puedas avisar al destinatario por otra vía. No se pierde ni se duplica el marcado.
 
+### Marcar para varios destinatarios a la vez
+
+En la pantalla de marcar, "+ Añadir otro destinatario" permite meter varios destinatarios en una sola pasada: subes el archivo **una vez**, añades tantas filas de nombre/email como haga falta, y la app genera una copia marcada distinta para cada uno — sin tener que repetir todo el proceso desde cero por cada persona.
+
+**Cómo funciona**: `POST /ocultar-marca-lote` recibe el archivo una sola vez y una lista de destinatarios (`destinatarios`, JSON: `[{"nombre": "...", "email": "..."}, ...]`, máximo 50). Para cada uno:
+- Se genera un **código corto aleatorio y único** (8 caracteres, sin necesidad de que tú lo escribas — se comprueba contra Supabase que no coincida con uno ya usado).
+- Se marca una copia nueva del archivo original con ese código.
+- Se guarda el registro en Supabase, igual que en el marcado normal.
+
+Al terminar, según lo que hayas elegido:
+- **Descargar**: te devuelve un único `.zip` con todas las copias dentro, nombradas por destinatario (`nombre_codigo.png`, con un sufijo `_2`, `_3`... si repites el mismo nombre) — así identificas cada copia sin tener que ir una a una a `GET /copias/...`.
+- **Enviar por email**: envía cada copia por separado a su destinatario (mismo mecanismo que el envío individual, ver arriba) y devuelve un resumen: `{"enviados": ["email1", ...], "fallidos": [{"email": "...", "error": "..."}]}`. Si falla el envío a alguno, los demás se siguen enviando igual — no es todo o nada.
+
+**En la pantalla de marcar**: con un solo destinatario, todo funciona exactamente igual que antes (incluido poder escribir tu propio código). En cuanto añades un segundo destinatario, el campo de código desaparece (se genera solo) y los textos de los botones cambian para dejar claro que se está marcando/enviando un lote.
+
+Probado con 3 destinatarios (dos con el mismo nombre, para comprobar que no se pisan los archivos en el `.zip`): cada copia decodificó exacto su propio código, y los tres registros quedaron guardados con el destinatario correcto. También probado el envío por email con un destinatario válido y otro que Resend rechaza (modo de prueba) — el válido se envió, el inválido quedó reportado en `fallidos` sin bloquear al resto.
+
 ### Cambiar tu propia contraseña
 
 No es un endpoint del backend — el frontend llama directamente a Supabase (`supabase.auth.updateUser({ password })`) usando la sesión que ya tienes abierta. No hace falta la contraseña actual (el hecho de tener una sesión válida ya es suficiente prueba), ni que Supabase tenga configurado el envío de emails (que es lo que fallaba antes, cuando la única forma de cambiarla era pedirle a Supabase que mandara un email de recuperación).
@@ -487,4 +505,5 @@ Estas viven en los paneles de Render/Vercel, no en archivos `.env` (esos son sol
 - [x] **Bug: la marca se perdía en imágenes de blanco y negro puros (documentos escaneados de texto)** (2026-08-11) — causa raíz: un píxel a 255 o a 0 no deja margen de color donde esconder la marca, y se recorta en silencio. Solucionado acercando el blanco/negro puros al centro en solo 3 unidades (imperceptible) antes de marcar, y reduciendo un suavizado que era más fuerte de lo necesario. Confirmado con una página de texto escaneada simulada, como imagen suelta y dentro de un PDF, sin romper ninguna de las pruebas anteriores (foto real, WhatsApp, recorte con margen). Ver [Por qué se evita el blanco y negro puros](#por-qué-se-evita-el-blanco-y-negro-puros).
 - [x] **Investigar si "captura de pantalla + reenvío" permite evadir la marca** (2026-08-11) — probado con un caso real: PDF marcado → capturado con el móvil → la captura reenviada por WhatsApp como imagen. Aceptado como limitación conocida, no como bug a corregir: es específico de dibujos técnicos con líneas finas sobre fondo casi todo blanco (planos, CAD); fotos y documentos de texto normales sobreviven bien al mismo escenario, probado explícitamente. Ver [Limitaciones conocidas](#limitaciones-conocidas-probadas-no-teóricas).
 - [x] **Enviar directamente por email al destinatario** (2026-08-12) — al marcar un archivo, puedes elegir entre descargarlo (como antes) o que la app lo envíe directamente por email usando Resend. Probado de extremo a extremo con un envío real. Ver [Enviar directamente por email al destinatario](#enviar-directamente-por-email-al-destinatario).
+- [x] **Marcar para varios destinatarios a la vez** (2026-08-12) — subir el archivo una sola vez y generar una copia distinta por destinatario, con código único autogenerado, entregadas en un `.zip` o por email a cada uno. Probado con 3 destinatarios (nombres repetidos incluidos) y con un envío parcialmente fallido. Ver [Marcar para varios destinatarios a la vez](#marcar-para-varios-destinatarios-a-la-vez).
 - [ ] Carpeta `/mobile` para la app móvil

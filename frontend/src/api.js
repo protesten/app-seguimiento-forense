@@ -84,6 +84,33 @@ export async function ocultarMarca({
   return { blob: await respuesta.blob(), esPdf: pdf }
 }
 
+export async function ocultarMarcaLote({ archivo, destinatarios, archivoId, enviarPorEmail }) {
+  const pdf = esPdf(archivo)
+  const datos = new FormData()
+  datos.append('archivo', archivo)
+  datos.append('destinatarios', JSON.stringify(destinatarios))
+  if (archivoId) {
+    datos.append('archivo_id', archivoId)
+  }
+  if (enviarPorEmail) {
+    datos.append('enviar_por_email', 'true')
+  }
+
+  const respuesta = await fetch(`${API_BASE_URL}/ocultar-marca-lote`, {
+    method: 'POST',
+    body: datos,
+    headers: await cabecerasAuth(),
+  })
+  if (!respuesta.ok) {
+    throw new Error(await leerError(respuesta, 'No se pudo marcar el archivo para el lote de destinatarios'))
+  }
+
+  if (enviarPorEmail) {
+    return { enviado: true, esPdf: pdf, ...(await respuesta.json()) }
+  }
+  return { blob: await respuesta.blob(), esPdf: pdf }
+}
+
 export async function extraerMarca(archivo) {
   const pdf = esPdf(archivo)
   const datos = new FormData()

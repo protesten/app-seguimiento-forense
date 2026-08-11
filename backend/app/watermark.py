@@ -1,4 +1,6 @@
 import io
+import secrets
+import string
 
 import cv2
 import numpy as np
@@ -26,6 +28,15 @@ TAMANO_CANONICO = (512, 512)
 # simple vista pero suficiente para que la conversion de color tenga margen
 # donde representar el cambio del marcado.
 MARGEN_SEGURIDAD_BRILLO = 3
+
+# Sin caracteres ambiguos (0/O, 1/l/I) para que, si alguna vez alguien tiene
+# que leerlo o escribirlo a mano, no haya confusion.
+_ALFABETO_CODIGO = "abcdefghjkmnpqrstuvwxyz23456789"
+
+
+def generar_codigo_aleatorio() -> str:
+    """Genera un codigo corto al azar para usar como ID_Usuario (marcado por lotes)."""
+    return "".join(secrets.choice(_ALFABETO_CODIGO) for _ in range(WATERMARK_LENGTH_BYTES))
 
 
 class ImagenDemasiadoPequenaError(Exception):

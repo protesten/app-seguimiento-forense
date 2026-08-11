@@ -1,5 +1,9 @@
+import io
+import json
 import logging
 import os
+import re
+import zipfile
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +32,7 @@ from app.watermark import (
     WATERMARK_LENGTH_BYTES,
     ImagenDemasiadoPequenaError,
     extraer_marca_candidatos,
+    generar_codigo_aleatorio,
     ocultar_marca,
 )
 from app.watermark_pdf import PdfInvalidoError, extraer_marca_pdf, ocultar_marca_pdf
@@ -270,6 +275,131 @@ async def endpoint_ocultar_marca_pdf(
         return {"enviado": True, "email_destinatario": email_destinatario}
 
     return Response(content=pdf_marcado, media_type="application/pdf")
+
+
+MAXIMO_DESTINATARIOS_POR_LOTE = 50
+
+
+def _es_pdf(archivo: UploadFile) -> bool:
+    return archivo.content_type == "application/pdf" or (archivo.filename or "").lower().endswith(".pdf")
+
+
+def _generar_codigo_unico() -> str:
+    for _ in range(5):
+        codigo = generar_codigo_aleatorio()
+        try:
+            if not buscar_copias_por_marca(codigo, tolerancia=0):
+                return codigo
+        except Exception as error:
+            logger.warning("No se pudo comprobar si el codigo %r ya existia: %s", codigo, error)
+            return codigo
+    raise HTTPException(status_code=500, detail="No se pudo generar un codigo unico, intentalo de nuevo")
+
+
+def _nombre_seguro_para_zip(nombre: str) -> str:
+    limpio = re.sub(r"[^a-zA-Z0-9_-]+", "_", nombre.strip()).strip("_")
+    return limpio[:40] or "destinatario"
+
+
+@app.post("/ocultar-marca-lote")
+async def endpoint_ocultar_marca_lote(
+    archivo: UploadFile = File(...),
+    destinatarios: str = Form(...),
+    archivo_id: str | None = Form(None),
+    enviar_por_email: bool = Form(False),
+    usuario=Depends(usuario_autenticado),
+):
+    """Marca el mismo archivo una vez por cada destinatario, con un codigo unico
+    generado automaticamente para cada copia, y luego lo entrega todo junto:
+    en un .zip para descargar, o enviando cada copia por email a quien le toca.
+    """
+    try:
+        lista_destinatarios = json.loads(destinatarios)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="destinatarios debe ser una lista en formato JSON")
+
+    if not isinstance(lista_destinatarios, list) or not lista_destinatarios:
+        raise HTTPException(status_code=400, detail="Incluye al menos un destinatario")
+    if len(lista_destinatarios) > MAXIMO_DESTINATARIOS_POR_LOTE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximo {MAXIMO_DESTINATARIOS_POR_LOTE} destinatarios por lote",
+        )
+    for item in lista_destinatarios:
+        if not isinstance(item, dict) or not str(item.get("nombre", "")).strip() or not str(item.get("email", "")).strip():
+            raise HTTPException(status_code=400, detail="Cada destinatario necesita nombre y email")
+
+    datos = await archivo.read()
+    es_pdf = _es_pdf(archivo)
+
+    copias = []
+    for item in lista_destinatarios:
+        nombre_destinatario = str(item["nombre"]).strip()
+        email_destinatario = str(item["email"]).strip()
+        codigo = _generar_codigo_unico()
+
+        try:
+            datos_marcados = ocultar_marca_pdf(datos, codigo) if es_pdf else ocultar_marca(datos, codigo)
+        except (ImagenDemasiadoPequenaError, PdfInvalidoError) as error:
+            raise HTTPException(status_code=400, detail=str(error))
+        except Exception as error:
+            logger.error("Error al procesar archivo en /ocultar-marca-lote: %s", error)
+            raise HTTPException(status_code=400, detail="No se pudo procesar el archivo. Revisa que sea valido.")
+
+        try:
+            registrar_copia_distribuida(
+                id_unico_marca=codigo,
+                nombre_destinatario=nombre_destinatario,
+                email_destinatario=email_destinatario,
+                archivo_id=archivo_id or None,
+            )
+        except Exception as error:
+            logger.warning("No se pudo guardar la copia distribuida en Supabase: %s", error)
+
+        copias.append(
+            {
+                "nombre": nombre_destinatario,
+                "email": email_destinatario,
+                "id_unico_marca": codigo,
+                "datos": datos_marcados,
+            }
+        )
+
+    if enviar_por_email:
+        enviados = []
+        fallidos = []
+        nombre_archivo = "documento_marcado.pdf" if es_pdf else "imagen_marcada.png"
+        for copia in copias:
+            try:
+                enviar_archivo_por_email(
+                    email_destinatario=copia["email"],
+                    nombre_destinatario=copia["nombre"],
+                    nombre_archivo=nombre_archivo,
+                    datos_archivo=copia["datos"],
+                )
+                enviados.append(copia["email"])
+            except EnvioEmailError as error:
+                logger.error("No se pudo enviar el email a %s en /ocultar-marca-lote: %s", copia["email"], error)
+                fallidos.append({"email": copia["email"], "error": str(error)})
+        return {"enviados": enviados, "fallidos": fallidos}
+
+    extension = "pdf" if es_pdf else "png"
+    buffer = io.BytesIO()
+    usados = {}
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_archivo:
+        for copia in copias:
+            base = _nombre_seguro_para_zip(copia["nombre"])
+            usados[base] = usados.get(base, 0) + 1
+            sufijo = "" if usados[base] == 1 else f"_{usados[base]}"
+            nombre_en_zip = f"{base}{sufijo}_{copia['id_unico_marca']}.{extension}"
+            zip_archivo.writestr(nombre_en_zip, copia["datos"])
+    buffer.seek(0)
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=documentos_marcados.zip"},
+    )
 
 
 @app.post("/extraer-marca-pdf")
