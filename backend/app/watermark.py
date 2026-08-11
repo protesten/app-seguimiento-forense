@@ -20,6 +20,13 @@ MIN_IMAGE_SIDE = 256
 # final, que conserva su resolucion original.
 TAMANO_CANONICO = (512, 512)
 
+# Margen de seguridad para evitar que un pixel puro blanco (255) o puro negro
+# (0) rompa la marca (ver "Por que se evita el blanco y negro puros" en el
+# README). Cambia el brillo como mucho en esta cantidad, imperceptible a
+# simple vista pero suficiente para que la conversion de color tenga margen
+# donde representar el cambio del marcado.
+MARGEN_SEGURIDAD_BRILLO = 3
+
 
 class ImagenDemasiadoPequenaError(Exception):
     pass
@@ -60,6 +67,14 @@ def ocultar_marca(datos_imagen: bytes, id_usuario: str) -> bytes:
             f"(recibida: {ancho_original}x{alto_original})"
         )
 
+    # Ver "Por que se evita el blanco y negro puros" en el README: un pixel a
+    # 255 o a 0 no deja margen para que la conversion de color represente el
+    # cambio del marcado, y OpenCV lo recorta en silencio. Se aplica aqui, a
+    # la imagen COMPLETA (no solo a la copia de trabajo reducida), porque la
+    # perturbacion final se suma sobre esta imagen -- si se dejara en 255 el
+    # recorte volveria a ocurrir en ese ultimo paso.
+    imagen_bgr = np.clip(imagen_bgr, MARGEN_SEGURIDAD_BRILLO, 255 - MARGEN_SEGURIDAD_BRILLO).astype(np.uint8)
+
     contenido = id_usuario.encode("utf-8")[:WATERMARK_LENGTH_BYTES]
     contenido = contenido.ljust(WATERMARK_LENGTH_BYTES, b"\x00")
     bits = list(np.unpackbits(np.frombuffer(contenido, dtype=np.uint8)))
@@ -76,12 +91,21 @@ def ocultar_marca(datos_imagen: bytes, id_usuario: str) -> bytes:
     # patron sutil en zonas de color muy uniforme (degradados, cielos, fondos
     # lisos). Se detecto probando con una imagen de gradiente real, el peor
     # caso posible para este tipo de artefacto.
+    #
+    # El segundo suavizado se dejo deliberadamente mas suave que al principio
+    # (era 9x9/sigma 2.0): en imagenes con muy poco contraste util para la
+    # marca -- un documento escaneado en blanco y negro es el caso mas claro
+    # -- ese suavizado adicional, aplicado ya a tamano completo, era
+    # suficiente para borrar el poco margen que quedaba y perder la marca por
+    # completo. Se comprobo visualmente (incluida una imagen de gradiente
+    # real) que con este valor mas bajo sigue sin apreciarse ninguna
+    # cuadricula.
     perturbacion = (canonica_marcada.astype(np.int16) - canonica.astype(np.int16)).astype(np.float32)
     perturbacion = cv2.GaussianBlur(perturbacion, (5, 5), sigmaX=1.0)
     perturbacion_completa = cv2.resize(
         perturbacion, (ancho_original, alto_original), interpolation=cv2.INTER_LINEAR
     )
-    perturbacion_completa = cv2.GaussianBlur(perturbacion_completa, (9, 9), sigmaX=2.0)
+    perturbacion_completa = cv2.GaussianBlur(perturbacion_completa, (3, 3), sigmaX=0.7)
 
     imagen_marcada = np.clip(imagen_bgr.astype(np.float32) + perturbacion_completa, 0, 255).astype(np.uint8)
 
@@ -89,6 +113,10 @@ def ocultar_marca(datos_imagen: bytes, id_usuario: str) -> bytes:
 
 
 def _decodificar_bgr(imagen_bgr: np.ndarray) -> str:
+    # Sin clamp aqui a proposito: el margen de seguridad solo hace falta al
+    # ESCONDER la marca (para que el algoritmo tenga donde moverse). Si se
+    # repitiera aqui, recortaria el propio cambio que el marcado ya hizo por
+    # encima de ese margen y rompería la lectura.
     canonica = cv2.resize(imagen_bgr, TAMANO_CANONICO, interpolation=cv2.INTER_AREA)
     embed = EmbedDwtDctSvd(wmLen=WATERMARK_LENGTH_BITS)
     bits = embed.decode(canonica)
