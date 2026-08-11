@@ -8,3 +8,6 @@
 # Basura del sistema operativo
 .DS_Store
 Thumbs.db
+
+# Imagenes de prueba usadas para diagnosticar problemas puntuales (no son parte de la app)
+/pruebaimagenes/
