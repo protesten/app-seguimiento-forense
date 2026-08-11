@@ -28,6 +28,7 @@ Lo que **ya funciona y está probado**:
 - ✅ **Bug crítico corregido (2026-08-11)**: la marca de imágenes no sobrevivía a reenviarlas por WhatsApp — se perdía por completo, no parcialmente. La causa real no era la compresión (eso ya lo tolerábamos bien) sino que **WhatsApp cambia la resolución de la imagen**, y el algoritmo no tenía forma de encontrar la marca si el tamaño no coincidía exactamente con el original. Se rediseñó el marcado para que sea invariante a cambios de resolución (ver [Por qué se marca a un tamaño fijo](#por-qué-se-marca-a-un-tamaño-fijo-no-al-tamaño-original-de-la-imagen)). Confirmado con las imágenes reales del usuario que fallaban antes de este cambio.
 - ✅ **Destinatarios guardados**: al marcar un archivo, puedes elegir un destinatario ya guardado (autocompleta nombre y email) o guardar uno nuevo con una casilla, para no tener que volver a escribirlo la próxima vez. Cada usuario tiene su propia lista, aislada de la de los demás.
 - ✅ **Tolerancia a márgenes en capturas de pantalla (2026-08-11)**: una captura que incluye un margen alrededor del contenido (barra de herramientas de un visor, fondo, scroll no perfecto) ya no rompe la lectura de la marca — se detecta y recorta automáticamente el margen antes de leer (ver [Tolerancia a márgenes/recortes en capturas de pantalla](#tolerancia-a-márgenesrecortes-en-capturas-de-pantalla)).
+- ✅ **Enviar directamente por email al destinatario (2026-08-12)**: al marcar un archivo, puedes elegir entre descargarlo o que la app lo mande por email usando Resend, sin tener que reenviarlo tú a mano. Ver [Enviar directamente por email al destinatario](#enviar-directamente-por-email-al-destinatario).
 
 Lo que **falta** está en la sección [Próximos pasos](#próximos-pasos-del-proyecto) al final de este documento.
 
@@ -241,11 +242,14 @@ Recibe una imagen, esconde un código dentro y guarda en Supabase quién la reci
 | `nombre_destinatario` | Sí | Nombre de la persona a la que le vas a entregar esta copia |
 | `email_destinatario` | Sí | Su email |
 | `archivo_id` | No | El `id` de una fila ya creada en `archivos_originales`, si quieres vincular esta copia a un documento concreto |
+| `enviar_por_email` | No | Si es `true`, en vez de devolver el archivo, lo envía por email a `email_destinatario` y devuelve `{"enviado": true, "email_destinatario": "..."}`. Ver [Enviar directamente por email al destinatario](#enviar-directamente-por-email-al-destinatario) |
 
 Ejemplo con `curl` (todo en una sola línea, para evitar líos de sintaxis entre terminales):
 ```bash
 curl -X POST http://localhost:8000/ocultar-marca -F "imagen=@foto.png" -F "ID_Usuario=user007" -F "nombre_destinatario=Juan Perez" -F "email_destinatario=juan@example.com" -o foto_marcada.png
 ```
+
+`POST /ocultar-marca-pdf` acepta los mismos campos (con `pdf` en vez de `imagen`).
 
 ### `POST /extraer-marca`
 
@@ -308,6 +312,20 @@ Cualquier usuario logueado (no hace falta ser admin) puede guardar personas a la
 | `DELETE /destinatarios/{id}` | Elimina uno. Si el `id` no es tuyo (es de otro usuario o no existe), no falla pero tampoco borra nada — así no se puede usar para averiguar si un ID pertenece a otra persona |
 
 El aislamiento entre usuarios se hace comparando siempre `usuario_id` en el backend (igual que con los roles: no hay políticas RLS para esto, todo pasa por el `service_role` del backend).
+
+### Enviar directamente por email al destinatario
+
+En la pantalla de marcar, además de "Descargar el archivo marcado" puedes elegir "Enviarlo directamente por email al destinatario" — así no hace falta descargarlo y reenviarlo tú a mano, la propia app se lo manda.
+
+**Cómo funciona**: el backend marca el archivo igual que siempre, guarda el registro en Supabase igual que siempre, y en vez de devolvértelo para descargar, lo adjunta a un email y lo envía usando [Resend](https://resend.com) (servicio de envío de emails, capa gratuita hasta 3.000 emails/mes). El envío es a través de su API, no de un servidor de correo propio.
+
+**Configuración necesaria** (variables de entorno `RESEND_API_KEY` y `RESEND_FROM_EMAIL`, ver [Variables de entorno en producción](#variables-de-entorno-en-producción)):
+1. Crea una cuenta gratuita en [resend.com](https://resend.com) y genera una clave API (API Keys → Create API Key).
+2. Pégala en `RESEND_API_KEY`.
+3. **Importante sobre el remitente**: sin verificar un dominio propio en Resend, solo puedes enviar usando `onboarding@resend.dev` como remitente (`RESEND_FROM_EMAIL`) — y con ese remitente de prueba, Resend **solo deja enviar al email con el que te registraste en resend.com**, no a destinatarios cualesquiera. Para enviar de verdad a tus destinatarios reales hace falta verificar un dominio propio en el panel de Resend (Domains → Add Domain, añadiendo unos registros DNS) y usar un remitente de ese dominio (por ejemplo `notificaciones@tudominio.com`).
+4. Puedes cambiar la clave API o el remitente cuando quieras editando esas dos variables — no hace falta tocar el código.
+
+**Si el envío falla** (clave no configurada, límite de Resend alcanzado, destinatario no permitido en modo de prueba, etc.): el archivo **ya se marcó y el registro ya se guardó** en Supabase antes de intentar el envío — solo falla el email, y el frontend te muestra el error para que puedas avisar al destinatario por otra vía. No se pierde ni se duplica el marcado.
 
 ### Cambiar tu propia contraseña
 
@@ -422,6 +440,7 @@ Estas viven en los paneles de Render/Vercel, no en archivos `.env` (esos son sol
 **Render** (Environment):
 - `SUPABASE_URL`, `SUPABASE_KEY` (la clave `service_role`)
 - `FRONTEND_ORIGINS=https://app-seguimiento-forense.vercel.app` (para que el navegador pueda hablar con la API — si despliegas el frontend en otro dominio más adelante, añádelo aquí separado por comas)
+- `RESEND_API_KEY`, `RESEND_FROM_EMAIL` (para "Enviar directamente por email" — ver [Enviar directamente por email al destinatario](#enviar-directamente-por-email-al-destinatario). Opcional: sin esto, esa opción concreta falla con un aviso claro, el resto de la app sigue funcionando igual)
 
 **Vercel** (Settings → Environment Variables):
 - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (la clave pública/`publishable`, no la `service_role`)
@@ -467,4 +486,5 @@ Estas viven en los paneles de Render/Vercel, no en archivos `.env` (esos son sol
 - [x] **Tolerar pequeños márgenes/recortes al leer la marca de una captura de pantalla** (2026-08-11) — antes hacía falta un encuadre pixel-perfect (un margen del 0.5% ya rompía la lectura). Se añadió una detección automática de margen por fila/columna (basada en varianza de píxeles, fiable para capturas digitales) que genera una lectura candidata recortada además de la lectura directa, contrastando cada candidata contra los códigos reales en la base de datos. Ver [Tolerancia a márgenes/recortes en capturas de pantalla](#tolerancia-a-márgenesrecortes-en-capturas-de-pantalla).
 - [x] **Bug: la marca se perdía en imágenes de blanco y negro puros (documentos escaneados de texto)** (2026-08-11) — causa raíz: un píxel a 255 o a 0 no deja margen de color donde esconder la marca, y se recorta en silencio. Solucionado acercando el blanco/negro puros al centro en solo 3 unidades (imperceptible) antes de marcar, y reduciendo un suavizado que era más fuerte de lo necesario. Confirmado con una página de texto escaneada simulada, como imagen suelta y dentro de un PDF, sin romper ninguna de las pruebas anteriores (foto real, WhatsApp, recorte con margen). Ver [Por qué se evita el blanco y negro puros](#por-qué-se-evita-el-blanco-y-negro-puros).
 - [x] **Investigar si "captura de pantalla + reenvío" permite evadir la marca** (2026-08-11) — probado con un caso real: PDF marcado → capturado con el móvil → la captura reenviada por WhatsApp como imagen. Aceptado como limitación conocida, no como bug a corregir: es específico de dibujos técnicos con líneas finas sobre fondo casi todo blanco (planos, CAD); fotos y documentos de texto normales sobreviven bien al mismo escenario, probado explícitamente. Ver [Limitaciones conocidas](#limitaciones-conocidas-probadas-no-teóricas).
+- [x] **Enviar directamente por email al destinatario** (2026-08-12) — al marcar un archivo, puedes elegir entre descargarlo (como antes) o que la app lo envíe directamente por email usando Resend. Probado de extremo a extremo con un envío real. Ver [Enviar directamente por email al destinatario](#enviar-directamente-por-email-al-destinatario).
 - [ ] Carpeta `/mobile` para la app móvil

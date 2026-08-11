@@ -25,6 +25,7 @@ function MarcarImagen() {
   const [idUsuario, setIdUsuario] = useState('')
   const [nombreDestinatario, setNombreDestinatario] = useState('')
   const [emailDestinatario, setEmailDestinatario] = useState('')
+  const [formaEntrega, setFormaEntrega] = useState('descargar')
 
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState(null)
@@ -105,14 +106,20 @@ function MarcarImagen() {
 
     setCargando(true)
     try {
-      const { blob, esPdf: fuePdf } = await ocultarMarca({
+      const enviarPorEmail = formaEntrega === 'email'
+      const resultadoMarcado = await ocultarMarca({
         archivo,
         idUsuario,
         nombreDestinatario,
         emailDestinatario,
         archivoId,
+        enviarPorEmail,
       })
-      setResultado({ url: URL.createObjectURL(blob), esPdf: fuePdf })
+      if (enviarPorEmail) {
+        setResultado({ enviado: true, esPdf: resultadoMarcado.esPdf, email: emailDestinatario })
+      } else {
+        setResultado({ url: URL.createObjectURL(resultadoMarcado.blob), esPdf: resultadoMarcado.esPdf })
+      }
 
       if (guardarDestinatario && !destinatarioGuardadoId) {
         try {
@@ -298,12 +305,44 @@ function MarcarImagen() {
           )}
         </div>
 
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Al terminar de marcar</label>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="radio"
+                name="forma_entrega"
+                value="descargar"
+                checked={formaEntrega === 'descargar'}
+                onChange={() => setFormaEntrega('descargar')}
+              />
+              Descargar el archivo marcado (yo lo envío a mano)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="radio"
+                name="forma_entrega"
+                value="email"
+                checked={formaEntrega === 'email'}
+                onChange={() => setFormaEntrega('email')}
+              />
+              Enviarlo directamente por email al destinatario
+            </label>
+          </div>
+        </div>
+
         <button
           type="submit"
           disabled={cargando}
           className="w-full bg-slate-800 text-white rounded-md py-2.5 font-medium hover:bg-slate-900 disabled:opacity-50"
         >
-          {cargando ? 'Marcando archivo...' : 'Marcar archivo y guardar registro'}
+          {cargando
+            ? formaEntrega === 'email'
+              ? 'Marcando y enviando...'
+              : 'Marcando archivo...'
+            : formaEntrega === 'email'
+              ? 'Marcar y enviar por email'
+              : 'Marcar archivo y guardar registro'}
         </button>
       </form>
 
@@ -311,7 +350,16 @@ function MarcarImagen() {
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</p>
       )}
 
-      {resultado && (
+      {resultado && resultado.enviado && (
+        <div className="border border-emerald-200 bg-emerald-50 rounded-md p-4 space-y-1 text-left">
+          <p className="text-sm text-emerald-700 font-medium">
+            Archivo marcado y enviado por email a {resultado.email}.
+          </p>
+          <p className="text-xs text-emerald-600">El registro se guardó en la base de datos.</p>
+        </div>
+      )}
+
+      {resultado && !resultado.enviado && (
         <div className="border border-emerald-200 bg-emerald-50 rounded-md p-4 space-y-3 text-left">
           <p className="text-sm text-emerald-700 font-medium">
             Archivo marcado correctamente. El registro se guardo en la base de datos.

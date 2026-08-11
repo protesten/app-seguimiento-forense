@@ -13,6 +13,7 @@ from app.admin import (
     obtener_estadisticas,
     usuario_es_admin,
 )
+from app.email_service import EnvioEmailError, enviar_archivo_por_email
 from app.supabase_client import (
     buscar_copias_por_marca,
     crear_destinatario_guardado,
@@ -118,6 +119,7 @@ async def endpoint_ocultar_marca(
     nombre_destinatario: str = Form(...),
     email_destinatario: str = Form(...),
     archivo_id: str | None = Form(None),
+    enviar_por_email: bool = Form(False),
     usuario=Depends(usuario_autenticado),
 ):
     if not ID_Usuario.strip():
@@ -163,6 +165,22 @@ async def endpoint_ocultar_marca(
         # del servidor para que sepas que ESE registro no quedo guardado en Supabase.
         logger.warning("No se pudo guardar la copia distribuida en Supabase: %s", error)
 
+    if enviar_por_email:
+        try:
+            enviar_archivo_por_email(
+                email_destinatario=email_destinatario,
+                nombre_destinatario=nombre_destinatario,
+                nombre_archivo="imagen_marcada.png",
+                datos_archivo=imagen_marcada_png,
+            )
+        except EnvioEmailError as error:
+            logger.error("No se pudo enviar el email en /ocultar-marca: %s", error)
+            raise HTTPException(
+                status_code=502,
+                detail=f"La imagen se marco correctamente pero no se pudo enviar por email: {error}",
+            )
+        return {"enviado": True, "email_destinatario": email_destinatario}
+
     return Response(content=imagen_marcada_png, media_type="image/png")
 
 
@@ -203,6 +221,7 @@ async def endpoint_ocultar_marca_pdf(
     nombre_destinatario: str = Form(...),
     email_destinatario: str = Form(...),
     archivo_id: str | None = Form(None),
+    enviar_por_email: bool = Form(False),
     usuario=Depends(usuario_autenticado),
 ):
     if not ID_Usuario.strip():
@@ -233,6 +252,22 @@ async def endpoint_ocultar_marca_pdf(
         )
     except Exception as error:
         logger.warning("No se pudo guardar la copia distribuida en Supabase: %s", error)
+
+    if enviar_por_email:
+        try:
+            enviar_archivo_por_email(
+                email_destinatario=email_destinatario,
+                nombre_destinatario=nombre_destinatario,
+                nombre_archivo="documento_marcado.pdf",
+                datos_archivo=pdf_marcado,
+            )
+        except EnvioEmailError as error:
+            logger.error("No se pudo enviar el email en /ocultar-marca-pdf: %s", error)
+            raise HTTPException(
+                status_code=502,
+                detail=f"El PDF se marco correctamente pero no se pudo enviar por email: {error}",
+            )
+        return {"enviado": True, "email_destinatario": email_destinatario}
 
     return Response(content=pdf_marcado, media_type="application/pdf")
 

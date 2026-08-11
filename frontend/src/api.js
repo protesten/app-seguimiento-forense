@@ -47,7 +47,14 @@ export function esPdf(archivo) {
   return archivo.type === 'application/pdf' || archivo.name?.toLowerCase().endsWith('.pdf')
 }
 
-export async function ocultarMarca({ archivo, idUsuario, nombreDestinatario, emailDestinatario, archivoId }) {
+export async function ocultarMarca({
+  archivo,
+  idUsuario,
+  nombreDestinatario,
+  emailDestinatario,
+  archivoId,
+  enviarPorEmail,
+}) {
   const pdf = esPdf(archivo)
   const datos = new FormData()
   datos.append(pdf ? 'pdf' : 'imagen', archivo)
@@ -56,6 +63,9 @@ export async function ocultarMarca({ archivo, idUsuario, nombreDestinatario, ema
   datos.append('email_destinatario', emailDestinatario)
   if (archivoId) {
     datos.append('archivo_id', archivoId)
+  }
+  if (enviarPorEmail) {
+    datos.append('enviar_por_email', 'true')
   }
 
   const endpoint = pdf ? '/ocultar-marca-pdf' : '/ocultar-marca'
@@ -66,6 +76,10 @@ export async function ocultarMarca({ archivo, idUsuario, nombreDestinatario, ema
   })
   if (!respuesta.ok) {
     throw new Error(await leerError(respuesta, 'No se pudo marcar el archivo'))
+  }
+
+  if (enviarPorEmail) {
+    return { enviado: true, esPdf: pdf }
   }
   return { blob: await respuesta.blob(), esPdf: pdf }
 }
